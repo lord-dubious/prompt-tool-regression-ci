@@ -40,3 +40,38 @@ def test_reset_and_404s(tmp_path: Path) -> None:
     assert api.post("/api/demo/reset").json()["run_count"] == 3
     assert api.get("/api/suites/missing").status_code == 404
     assert api.get("/api/runs/missing").status_code == 404
+
+
+def test_execute_suite_creates_reviewable_run(tmp_path: Path) -> None:
+    api = client(tmp_path)
+    response = api.post(
+        "/api/runs/execute",
+        json={
+            "suite_id": "suite_support",
+            "id": "run_local_support",
+            "label": "local support execution",
+            "prompt_version": "review-branch",
+        },
+    )
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["run"]["id"] == "run_local_support"
+    assert detail["run"]["changed"] == 1
+    assert len(detail["results"]) == 4
+    assert api.get("/api/summary").json()["run_count"] == 4
+
+
+def test_execute_suite_replaces_existing_run(tmp_path: Path) -> None:
+    api = client(tmp_path)
+    payload = {"suite_id": "suite_tools", "id": "run_replace", "label": "first"}
+    assert api.post("/api/runs/execute", json=payload).status_code == 200
+    payload["label"] = "second"
+    second = api.post("/api/runs/execute", json=payload).json()
+    assert second["run"]["label"] == "second"
+    assert second["run"]["failed"] == 1
+    assert api.get("/api/summary").json()["run_count"] == 4
+
+
+def test_execute_suite_rejects_missing_suite(tmp_path: Path) -> None:
+    api = client(tmp_path)
+    assert api.post("/api/runs/execute", json={"suite_id": "missing"}).status_code == 404
