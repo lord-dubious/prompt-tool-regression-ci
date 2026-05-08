@@ -14,6 +14,13 @@
       <h1>Prompt/Tool CI</h1>
       <p>Deterministic prompt and tool-call regression checks with reviewable diffs.</p>
       <div id="suite-list" class="stack"></div>
+      <section class="execute-panel" aria-labelledby="execute-title">
+        <p class="eyebrow">Local CI run</p>
+        <h2 id="execute-title">Execute suite</h2>
+        <p>Create a new deterministic run for the selected suite and inspect the resulting diffs.</p>
+        <button id="execute-btn" class="primary">Run selected suite</button>
+        <small id="execute-status">Select a suite, then run the local gate.</small>
+      </section>
       <button id="reset-btn" class="ghost">Reset demo data</button>
     </aside>
     <section class="content">
