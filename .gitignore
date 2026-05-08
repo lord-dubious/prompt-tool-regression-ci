@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.coverage
+coverage.xml
+.pytest_cache/
+.ruff_cache/
+prompt_regression_demo.sqlite3
+uv.lock
+*.log
+.DS_Store
