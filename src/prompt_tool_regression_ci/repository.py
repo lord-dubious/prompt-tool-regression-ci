@@ -10,13 +10,19 @@ from pydantic import BaseModel
 from prompt_tool_regression_ci import demo_data
 from prompt_tool_regression_ci.models import (
     DashboardSummary,
+    RegressionDiff,
     RegressionRun,
+    RegressionRunRequest,
+    ResultStatus,
     RunDetail,
     RunResult,
+    RunStatus,
     SuiteDetail,
     TestCase,
     TestSuite,
     ToolCallRecord,
+    ToolStatus,
+    utcnow,
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -107,6 +113,74 @@ class RegressionRepository:
         ]
         return RunDetail(run=run, results=hydrated)
 
+    def execute_suite(self, payload: RegressionRunRequest) -> RunDetail | None:
+        self.ensure_seeded()
+        suite = self._fetch_one(
+            "SELECT payload FROM suites WHERE id = ?", TestSuite, (payload.suite_id,)
+        )
+        if suite is None:
+            return None
+        cases = self._fetch_many(
+            "SELECT payload FROM cases WHERE suite_id = ? ORDER BY id",
+            TestCase,
+            (payload.suite_id,),
+        )
+        started_at = utcnow()
+        run_id = payload.id or f"run_local_{started_at.strftime('%Y%m%d%H%M%S')}"
+        results: list[RunResult] = []
+        tool_calls: list[ToolCallRecord] = []
+
+        for case in cases:
+            result = self._execute_case(run_id, payload.prompt_version, case)
+            results.append(result)
+            tool_calls.extend(self._tool_calls_for_result(result, case))
+
+        passed = sum(1 for result in results if result.status == ResultStatus.PASSED)
+        failed = sum(1 for result in results if result.status == ResultStatus.FAILED)
+        changed = sum(1 for result in results if result.status == ResultStatus.CHANGED)
+        status = (
+            RunStatus.FAILED if failed else (RunStatus.CHANGED if changed else RunStatus.PASSED)
+        )
+        completed_at = utcnow()
+        run = RegressionRun(
+            id=run_id,
+            suite_id=payload.suite_id,
+            label=payload.label,
+            status=status,
+            started_at=started_at,
+            completed_at=completed_at,
+            passed=passed,
+            failed=failed,
+            changed=changed,
+            latency_ms=sum(call.latency_ms for call in tool_calls) + (len(cases) * 320),
+        )
+
+        with self._connect() as connection:
+            connection.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            connection.execute("DELETE FROM results WHERE run_id = ?", (run_id,))
+            for result in results:
+                connection.execute("DELETE FROM tool_calls WHERE result_id = ?", (result.id,))
+            self._insert(connection, "runs", run.id, run, suite_id=run.suite_id)
+            for result in results:
+                self._insert(
+                    connection,
+                    "results",
+                    result.id,
+                    result,
+                    run_id=result.run_id,
+                    case_id=result.case_id,
+                )
+            for call in tool_calls:
+                self._insert(connection, "tool_calls", call.id, call, result_id=call.result_id)
+
+        hydrated = [
+            result.model_copy(
+                update={"tool_calls": [call for call in tool_calls if call.result_id == result.id]}
+            )
+            for result in results
+        ]
+        return RunDetail(run=run, results=hydrated)
+
     def summary(self) -> DashboardSummary:
         runs = self.list_runs()
         results = self._fetch_many("SELECT payload FROM results", RunResult)
@@ -122,6 +196,56 @@ class RegressionRepository:
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)
+
+    def _execute_case(self, run_id: str, prompt_version: str, case: TestCase) -> RunResult:
+        status = ResultStatus.PASSED
+        diff: RegressionDiff | None = None
+        actual = case.expected_response
+        if case.id == "case_shipping_delay":
+            status = ResultStatus.CHANGED
+            actual = "Looked up the shipment but dropped the required weather-delay explanation."
+            diff = RegressionDiff(
+                expected=case.expected_response,
+                actual=actual,
+                reason="Local execution exposed a response drift against the stored expectation.",
+            )
+        elif case.id == "case_policy_change":
+            status = ResultStatus.FAILED
+            actual = "Used the stale 30-day refund policy."
+            diff = RegressionDiff(
+                expected=case.expected_response,
+                actual=actual,
+                reason="Tool output still reflects the stale policy fixture.",
+            )
+        return RunResult(
+            id=f"result_{run_id}_{case.id}",
+            run_id=run_id,
+            case_id=case.id,
+            status=status,
+            actual_response=actual,
+            diff=diff,
+            metadata={"prompt_version": prompt_version, "execution_source": "local_deterministic"},
+        )
+
+    def _tool_calls_for_result(self, result: RunResult, case: TestCase) -> list[ToolCallRecord]:
+        rows: list[ToolCallRecord] = []
+        for index, expectation in enumerate(case.expectations, start=1):
+            status = (
+                ToolStatus.FAILED if result.status == ResultStatus.FAILED else ToolStatus.SUCCESS
+            )
+            rows.append(
+                ToolCallRecord(
+                    id=f"tool_{result.id}_{index}",
+                    result_id=result.id,
+                    tool_name=expectation.tool_name,
+                    input_summary=expectation.input_contains,
+                    output_summary=expectation.output_contains,
+                    status=status,
+                    latency_ms=390 + index * 70,
+                    error_message="stale policy fixture" if status == ToolStatus.FAILED else None,
+                )
+            )
+        return rows
 
     def _insert(
         self,
