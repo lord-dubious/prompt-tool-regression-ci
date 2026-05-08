@@ -7,6 +7,7 @@ Local-first CI harness for catching prompt and tool-call regressions before agen
 ## What Works Today
 
 - Deterministic prompt/tool regression suites for support and tool-planning workflows.
+- Live `POST /api/runs/execute` endpoint that creates a new local regression run from suite fixtures.
 - FastAPI API with seeded SQLite data and resettable demo state.
 - Dashboard for suites, runs, changed outputs, failed tool expectations, and diff reasons.
 - CI workflow covering Ruff, formatting, compile checks, pytest, and coverage on Python 3.11/3.12.
@@ -21,6 +22,7 @@ flowchart TB
         Expectations[Tool call expectations]
     end
     subgraph Runtime[Local Regression Runtime]
+        Execute[POST /api/runs/execute]
         Repo[SQLite repository]
         API[FastAPI endpoints]
         Dashboard[Browser dashboard]
@@ -33,7 +35,8 @@ flowchart TB
     end
     Suites --> Repo
     Cases --> Repo
-    Expectations --> Repo
+    Expectations --> Execute
+    Execute --> Repo
     Repo --> API --> Dashboard
     API --> Runs --> Results --> Gate
     Results --> Tools
@@ -53,7 +56,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed component map 
 uv run --extra dev prompt-tool-regression-ci
 ```
 
-Open `http://127.0.0.1:8030`.
+Open `http://127.0.0.1:8030`, select a suite, and click **Run selected suite** to create a fresh deterministic gate run.
 
 ## API Surface
 
@@ -62,8 +65,19 @@ Open `http://127.0.0.1:8030`.
 - `GET /api/suites`
 - `GET /api/suites/{suite_id}`
 - `GET /api/runs`
+- `POST /api/runs/execute`
 - `GET /api/runs/{run_id}`
 - `POST /api/demo/reset`
+
+## Local Execution Example
+
+```bash
+curl -X POST http://127.0.0.1:8030/api/runs/execute \
+  -H 'content-type: application/json' \
+  -d '{"suite_id":"suite_support","id":"run_review_local","label":"review local execution"}'
+```
+
+The endpoint runs deterministic prompt/tool fixtures, stores results and mocked tool calls in SQLite, and returns the new run detail for review.
 
 ## Current Limits
 

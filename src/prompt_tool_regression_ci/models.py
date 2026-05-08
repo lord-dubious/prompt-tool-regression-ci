@@ -68,6 +68,13 @@ class RegressionRun(BaseModel):
     latency_ms: int
 
 
+class RegressionRunRequest(BaseModel):
+    suite_id: str
+    id: str | None = None
+    label: str = "local regression execution"
+    prompt_version: str = "local-review"
+
+
 class ToolCallRecord(BaseModel):
     id: str
     result_id: str

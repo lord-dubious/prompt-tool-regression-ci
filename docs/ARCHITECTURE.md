@@ -19,6 +19,7 @@ flowchart TB
     subgraph Service[FastAPI Service]
         Summary[/api/summary]
         SuiteAPI[/api/suites]
+        Execute[/api/runs/execute]
         RunAPI[/api/runs]
         Reset[/api/demo/reset]
     end
@@ -31,6 +32,10 @@ flowchart TB
     Policy --> Cases
     ToolExpect --> Cases
     Cases --> Suites
+    Cases --> Execute
+    Execute --> Runs
+    Execute --> Results
+    Execute --> ToolCalls
     Suites --> Summary
     Runs --> RunAPI
     Results --> Diff
@@ -46,12 +51,13 @@ flowchart TB
     classDef review fill:#321b1f,stroke:#ff6b7a,color:#fff;
     class Prompt,Policy,ToolExpect author;
     class Suites,Cases,Runs,Results,ToolCalls data;
-    class Summary,SuiteAPI,RunAPI,Reset api;
+    class Summary,SuiteAPI,Execute,RunAPI,Reset api;
     class UI,Diff,Gate review;
 ```
 
 ## Boundaries
 
+- `POST /api/runs/execute` creates a new deterministic run from stored suite cases, expected outputs, and mocked tool expectations.
 - Tool calls are mocked deterministic records, not live external integrations.
 - Regression diffs are stored as structured data so reviewers can inspect why a candidate prompt changed behavior.
 - The CI workflow validates code quality and tests, while the application models what a prompt/tool behavior gate would expose.

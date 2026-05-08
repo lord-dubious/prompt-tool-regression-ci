@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from prompt_tool_regression_ci.models import (
     DashboardSummary,
     RegressionRun,
+    RegressionRunRequest,
     RunDetail,
     SuiteDetail,
     TestSuite,
@@ -55,6 +56,14 @@ def suite_detail(suite_id: str, repository: RepositoryDep) -> SuiteDetail:
 @router.get("/runs")
 def runs(repository: RepositoryDep) -> list[RegressionRun]:
     return repository.list_runs()
+
+
+@router.post("/runs/execute", response_model=RunDetail)
+def execute_run(payload: RegressionRunRequest, repository: RepositoryDep) -> RunDetail:
+    detail = repository.execute_suite(payload)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Suite not found")
+    return detail
 
 
 @router.get("/runs/{run_id}")
